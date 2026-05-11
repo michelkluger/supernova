@@ -1,5 +1,8 @@
 # Supernova
 
+<img width="442" height="683" alt="image" src="https://github.com/user-attachments/assets/6f279531-8eb5-452a-a48e-d6e0c231efb8" />
+
+
 A custom full-screen Connect IQ data field for the Garmin Edge 1030 Plus — every metric a performance-oriented cyclist watches, in one cockpit-style screen. Design lives in `../mockup-v2.html`.
 
 **Sections:** Status · Progress · Power (zone bar + IF/%FTP/W·kg⁻¹/L·R) · Time in Zone · Heart Rate (zone bar + %LTHR/Drift) · Speed + Cadence · Cycling Dynamics (Power Phase + sit/stand) · Ride summary footer (TSS/kcal/Load).
