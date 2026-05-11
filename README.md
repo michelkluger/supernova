@@ -1,6 +1,7 @@
 # Supernova
 
-<img width="442" height="683" alt="image" src="https://github.com/user-attachments/assets/6f279531-8eb5-452a-a48e-d6e0c231efb8" />
+<img width="600" height="923" alt="image" src="https://github.com/user-attachments/assets/936102f5-ec3a-4dab-b5eb-101f0af6225d" />
+
 
 A full-screen Connect IQ data field for the **Garmin Edge 1030 Plus**. Every metric a performance-oriented cyclist watches, in one cockpit-style screen.
 
