@@ -314,11 +314,13 @@ class EdgeDataFieldView extends WatchUi.DataField {
         var pad = 10;
 
         // big number on left (no section label — the W unit identifies it)
+        var powerStr = Format.int(power);
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 28, Graphics.FONT_NUMBER_MEDIUM, Format.int(power),
+        dc.drawText(pad, y + 28, Graphics.FONT_NUMBER_MEDIUM, powerStr,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        var powerW = dc.getTextWidthInPixels(powerStr, Graphics.FONT_NUMBER_MEDIUM);
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad + 78, y + 40, Graphics.FONT_XTINY, "W",
+        dc.drawText(pad + powerW + 4, y + 40, Graphics.FONT_XTINY, "W",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // ø / ▲ line (avg/max)
@@ -360,23 +362,15 @@ class EdgeDataFieldView extends WatchUi.DataField {
     }
 
     // ──────────────── TIME IN ZONE bar ────────────────
+    // No label — the colored histogram speaks for itself, and "total" = RIDE time anyway.
     function _drawTimeInZone(dc, y, h, w) {
         var pad = 10;
-        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 7, Graphics.FONT_XTINY, "TIME IN ZONE",
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-
-        // total
         var total = 0;
         for (var i = 0; i < tizPower.size(); i++) { total += tizPower[i]; }
-        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w - pad, y + 7, Graphics.FONT_XTINY,
-                    Format.duration(total) + " total",
-                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
-
-        // stacked bar
         if (total <= 0) { return; }
-        var bx = pad, bw = w - 2 * pad, by = y + 16, bh = 10;
+
+        // Stacked bar centered vertically in the section
+        var bx = pad, bw = w - 2 * pad, by = y + (h - 12) / 2, bh = 12;
         var x = bx;
         for (var i = 0; i < tizPower.size(); i++) {
             var seg = ((tizPower[i].toFloat() / total) * bw).toNumber();
@@ -392,11 +386,13 @@ class EdgeDataFieldView extends WatchUi.DataField {
         var pad = 10;
 
         // big number (no section label — BPM unit identifies it)
+        var hrStr = Format.int(hr);
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 22, Graphics.FONT_NUMBER_MILD, Format.int(hr),
+        dc.drawText(pad, y + 22, Graphics.FONT_NUMBER_MILD, hrStr,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        var hrW = dc.getTextWidthInPixels(hrStr, Graphics.FONT_NUMBER_MILD);
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad + 60, y + 32, Graphics.FONT_XTINY, "BPM",
+        dc.drawText(pad + hrW + 3, y + 32, Graphics.FONT_XTINY, "BPM",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // ø / ▲
@@ -454,13 +450,14 @@ class EdgeDataFieldView extends WatchUi.DataField {
     // 9-arg max per Monkey C function — avg/max packed into a single caption string.
     function _drawTile(dc, x, y, w, h, label, unit, val, ammin) {
         var pad = 10;
-        // No tile section label — unit identifies the metric
 
+        // Big number, then unit positioned dynamically right after it
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
         dc.drawText(x + pad, y + 22, Graphics.FONT_NUMBER_MILD, val,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        var valW = dc.getTextWidthInPixels(val, Graphics.FONT_NUMBER_MILD);
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + pad + 56, y + 30, Graphics.FONT_XTINY, unit,
+        dc.drawText(x + pad + valW + 3, y + 30, Graphics.FONT_XTINY, unit,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
