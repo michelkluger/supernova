@@ -173,21 +173,20 @@ class EdgeDataFieldView extends WatchUi.DataField {
         dc.setColor(COL_BG, COL_BG);
         dc.clear();
 
-        // ─── section heights (matched to mockup-v2 flex weights) ───
-        // total = 470 — status(18) — prog(16) — footer(34) = 402 for middle 5 sections
-        // weights: power 2.2, tiz 0.55, hr 1.55, tiles 1.3, pdyn 2.4 → sum 8.0 → 50.25/fr
+        // ─── section heights ─── total = 470 px native
+        // status 18 + prog 16 + power 130 + tiz 28 + hr 90 + tiles 65 + terrain 89 + footer 34 = 470
         var yStatus = 0;
         var yProg   = yStatus + 18;
         var yPower  = yProg + 16;
-        var hPower  = 110;
+        var hPower  = 130;
         var yTiz    = yPower + hPower;
         var hTiz    = 28;
         var yHR     = yTiz + hTiz;
-        var hHR     = 78;
+        var hHR     = 90;
         var yTiles  = yHR + hHR;
         var hTiles  = 65;
         var yPedal  = yTiles + hTiles;
-        var hPedal  = 121;
+        var hPedal  = 89;
         var yFooter = h - 34;
 
         _drawStatusBar(dc, yStatus, w);
@@ -482,14 +481,17 @@ class EdgeDataFieldView extends WatchUi.DataField {
         dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "TERRAIN",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Totals (ascent / descent) — small, top-right
-        var ascentStr  = (totalAscent  != null) ? "↑" + totalAscent.toNumber().toString() + "m"  : "↑--";
-        var descentStr = (totalDescent != null) ? "↓" + totalDescent.toNumber().toString() + "m" : "↓--";
+        // Totals (ascent / descent) — small, top-right.
+        // Using +/- prefixes since FONT_XTINY doesn't render the unicode arrows.
+        var ascStr  = (totalAscent  != null) ? "+" + totalAscent.toNumber().toString()  + "m" : "+--m";
+        var dscStr  = (totalDescent != null) ? "-" + totalDescent.toNumber().toString() + "m" : "-0m";
         dc.setColor(COL_CAL, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w - pad, y + 8, Graphics.FONT_XTINY, ascentStr,
+        dc.drawText(w - pad, y + 8, Graphics.FONT_XTINY, ascStr,
                     Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+        // descent left of ascent, with a gap
+        var ascWidth = dc.getTextWidthInPixels(ascStr, Graphics.FONT_XTINY);
         dc.setColor(0x60a5fa, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w - pad - 56, y + 8, Graphics.FONT_XTINY, descentStr,
+        dc.drawText(w - pad - ascWidth - 8, y + 8, Graphics.FONT_XTINY, dscStr,
                     Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // ── Three primary cells: GRADE, ALTITUDE, VAM ──
@@ -540,8 +542,12 @@ class EdgeDataFieldView extends WatchUi.DataField {
         dc.drawText(vx, lblY, Graphics.FONT_XTINY, "VAM",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // ── Next waypoint preview (only when on a course) ──
-        if (distanceToNextPoint != null && elevationAtNextPoint != null && altitude != null) {
+        // ── Next waypoint preview (only when on a course AND there's a real next point) ──
+        // Skip if distance is trivial (no course loaded → field is often 0)
+        // or elevation reading is bogus (== 0 typically means no course data)
+        if (distanceToNextPoint != null && distanceToNextPoint > 100
+            && elevationAtNextPoint != null && elevationAtNextPoint > 0
+            && altitude != null) {
             var ny = y + 70;
             // dashed divider
             dc.setColor(COL_LINE, Graphics.COLOR_TRANSPARENT);
