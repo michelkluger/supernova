@@ -105,7 +105,17 @@ class EdgeDataFieldView extends WatchUi.DataField {
         maxCadence = info.maxCadence;
 
         distance     = info.elapsedDistance;
-        elapsedTime  = info.elapsedTime != null ? info.elapsedTime / 1000 : null;
+        var newElapsed = info.elapsedTime != null ? info.elapsedTime / 1000 : null;
+
+        // Activity restarted (FIT replay restarted, or app reloaded) — reset accumulators.
+        if (lastSampleTime != null && newElapsed != null && newElapsed < lastSampleTime - 3) {
+            for (var i = 0; i < tizPower.size(); i++) { tizPower[i] = 0; }
+            DriftTracker.reset();
+            TerrainTracker.reset();
+        }
+        lastSampleTime = newElapsed;
+        elapsedTime = newElapsed;
+
         calories     = info.calories;
 
         // Course-aware progress (populated when user loaded a course / navigation target)
@@ -303,25 +313,20 @@ class EdgeDataFieldView extends WatchUi.DataField {
     function _drawPowerSection(dc, y, h, w) {
         var pad = 10;
 
-        // section label
-        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "POWER",
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-
-        // big number on left
+        // big number on left (no section label — the W unit identifies it)
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 38, Graphics.FONT_NUMBER_MEDIUM, Format.int(power),
+        dc.drawText(pad, y + 28, Graphics.FONT_NUMBER_MEDIUM, Format.int(power),
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad + 78, y + 50, Graphics.FONT_XTINY, "W",
+        dc.drawText(pad + 78, y + 40, Graphics.FONT_XTINY, "W",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // ø / ▲ line (avg/max)
         dc.setColor(COL_AVG, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 64, Graphics.FONT_XTINY, "ø " + Format.int(avgPower),
+        dc.drawText(pad, y + 54, Graphics.FONT_XTINY, "ø " + Format.int(avgPower),
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad + 56, y + 64, Graphics.FONT_XTINY, "▲ " + Format.int(maxPower),
+        dc.drawText(pad + 56, y + 54, Graphics.FONT_XTINY, "▲ " + Format.int(maxPower),
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // sub-metrics on right
@@ -329,10 +334,9 @@ class EdgeDataFieldView extends WatchUi.DataField {
         var ifVal  = (avgPower != null && ftp > 0) ? avgPower.toFloat() / ftp : null;
         var pctFTP = (power != null && ftp > 0) ? (power.toFloat() / ftp * 100).toNumber() : null;
         var wkg    = (power != null && weight > 0) ? power.toFloat() / weight : null;
-        // L/R balance display reserved for when FIT-level balance is wired in
-        _drawSubRight(dc, subX, y + 32, "IF",    Format.fixed(ifVal, 2));
-        _drawSubRight(dc, subX, y + 47, "W/kg",  Format.fixed(wkg, 1));
-        _drawSubRight(dc, subX, y + 62, "%FTP",  Format.int(pctFTP));
+        _drawSubRight(dc, subX, y + 22, "IF",    Format.fixed(ifVal, 2));
+        _drawSubRight(dc, subX, y + 37, "W/kg",  Format.fixed(wkg, 1));
+        _drawSubRight(dc, subX, y + 52, "%FTP",  Format.int(pctFTP));
 
         // ─── zone bar ───
         var bx = pad, bw = w - 2 * pad, by = y + 80, bh = 14;
@@ -387,24 +391,20 @@ class EdgeDataFieldView extends WatchUi.DataField {
     function _drawHRSection(dc, y, h, w) {
         var pad = 10;
 
-        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "HEART RATE",
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-
-        // big number
+        // big number (no section label — BPM unit identifies it)
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 32, Graphics.FONT_NUMBER_MILD, Format.int(hr),
+        dc.drawText(pad, y + 22, Graphics.FONT_NUMBER_MILD, Format.int(hr),
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad + 60, y + 42, Graphics.FONT_XTINY, "BPM",
+        dc.drawText(pad + 60, y + 32, Graphics.FONT_XTINY, "BPM",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // ø / ▲
         dc.setColor(COL_AVG, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 54, Graphics.FONT_XTINY, "ø " + Format.int(avgHR),
+        dc.drawText(pad, y + 44, Graphics.FONT_XTINY, "ø " + Format.int(avgHR),
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad + 50, y + 54, Graphics.FONT_XTINY, "▲ " + Format.int(maxHR_v),
+        dc.drawText(pad + 50, y + 44, Graphics.FONT_XTINY, "▲ " + Format.int(maxHR_v),
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // sub-metrics
@@ -416,8 +416,8 @@ class EdgeDataFieldView extends WatchUi.DataField {
             var sign = (driftPct >= 0) ? "+" : "";
             driftStr = sign + driftPct.format("%.1f") + "%";
         }
-        _drawSubRight(dc, subX, y + 30, "%LTHR", Format.int(pctLthr));
-        _drawSubRight(dc, subX, y + 45, "DRIFT", driftStr);
+        _drawSubRight(dc, subX, y + 20, "%LTHR", Format.int(pctLthr));
+        _drawSubRight(dc, subX, y + 35, "DRIFT", driftStr);
 
         // zone bar
         var bx = pad, bw = w - 2 * pad, by = y + 64, bh = 12;
@@ -454,15 +454,13 @@ class EdgeDataFieldView extends WatchUi.DataField {
     // 9-arg max per Monkey C function — avg/max packed into a single caption string.
     function _drawTile(dc, x, y, w, h, label, unit, val, ammin) {
         var pad = 10;
-        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + pad, y + 8, Graphics.FONT_XTINY, label,
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        // No tile section label — unit identifies the metric
 
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + pad, y + 30, Graphics.FONT_NUMBER_MILD, val,
+        dc.drawText(x + pad, y + 22, Graphics.FONT_NUMBER_MILD, val,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + pad + 56, y + 38, Graphics.FONT_XTINY, unit,
+        dc.drawText(x + pad + 56, y + 30, Graphics.FONT_XTINY, unit,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
@@ -476,19 +474,14 @@ class EdgeDataFieldView extends WatchUi.DataField {
     function _drawTerrain(dc, y, h, w) {
         var pad = 10;
 
-        // Section label
-        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "TERRAIN",
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-
-        // Totals (ascent / descent) — small, top-right.
-        // Using +/- prefixes since FONT_XTINY doesn't render the unicode arrows.
-        var ascStr  = (totalAscent  != null) ? "+" + totalAscent.toNumber().toString()  + "m" : "+--m";
+        // No section label — sub-labels (GRADE %, ALT m, VAM m/h) identify each metric.
+        // Just the totals (ascent / descent) at top-right, using +/- prefixes
+        // since FONT_XTINY doesn't render the unicode arrow glyphs.
+        var ascStr  = (totalAscent  != null) ? "+" + totalAscent.toNumber().toString()  + "m" : "+0m";
         var dscStr  = (totalDescent != null) ? "-" + totalDescent.toNumber().toString() + "m" : "-0m";
         dc.setColor(COL_CAL, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w - pad, y + 8, Graphics.FONT_XTINY, ascStr,
                     Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
-        // descent left of ascent, with a gap
         var ascWidth = dc.getTextWidthInPixels(ascStr, Graphics.FONT_XTINY);
         dc.setColor(0x60a5fa, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w - pad - ascWidth - 8, y + 8, Graphics.FONT_XTINY, dscStr,
