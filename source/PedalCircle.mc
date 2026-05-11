@@ -52,10 +52,10 @@ module PedalCircle {
         // BDC tick (bottom)
         dc.drawLine(cx, cy + r - 2, cx, cy + r + 4);
 
-        // Center balance percentage
+        // Center balance percentage — FONT_TINY fits inside a 40px circle (was MILD, too big)
         if (balance != null) {
             dc.setColor(0xFFFFFF, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy, Graphics.FONT_NUMBER_MILD,
+            dc.drawText(cx, cy, Graphics.FONT_TINY,
                         balance.toNumber().toString() + "%",
                         Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
         }

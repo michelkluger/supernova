@@ -41,6 +41,8 @@ class EdgeDataFieldView extends WatchUi.DataField {
     var distance;                       // metres
     var elapsedTime;                    // seconds
     var calories;                       // kcal
+    var distanceToDest;                 // metres remaining on loaded course (null if no course)
+    var timeToDest;                     // seconds remaining (null if no course)
     var leftBalance;                    // % left
     var leftPP, leftPPP, leftPCO;
     var rightPP, rightPPP, rightPCO;
@@ -52,6 +54,7 @@ class EdgeDataFieldView extends WatchUi.DataField {
     function initialize() {
         DataField.initialize();
         _readSettings();
+        DriftTracker.reset();
     }
 
     function _readSettings() {
@@ -97,6 +100,13 @@ class EdgeDataFieldView extends WatchUi.DataField {
         distance     = info.elapsedDistance;
         elapsedTime  = info.elapsedTime != null ? info.elapsedTime / 1000 : null;
         calories     = info.calories;
+
+        // Course-aware progress (populated when user loaded a course / navigation target)
+        if (info has :distanceToDestination) { distanceToDest = info.distanceToDestination; }
+        if (info has :timeToDestination)     { timeToDest     = info.timeToDestination; }
+
+        // Roll the drift tracker
+        DriftTracker.tick(power, hr);
 
         // Cycling Dynamics — only present with dual-side power meter
         // Note: Activity.Info doesn't expose L/R balance directly on the Edge 1030+ SDK 9 surface.
@@ -226,28 +236,51 @@ class EdgeDataFieldView extends WatchUi.DataField {
     // ──────────────── progress bar ────────────────
     function _drawProgress(dc, y, w) {
         var distKm = (distance != null) ? distance / 1000.0 : 0.0;
-        var totalKm = 48.0;   // TODO: read from loaded course; placeholder for now
-        var pct = (distKm / totalKm);
-        if (pct > 1) { pct = 1.0; }
-        if (pct < 0) { pct = 0.0; }
+        var totalKm = null;
+        var pct = 0.0;
+
+        if (distanceToDest != null && distance != null) {
+            // Course loaded — real progress
+            var totalM = distance.toFloat() + distanceToDest.toFloat();
+            if (totalM > 0) {
+                totalKm = totalM / 1000.0;
+                pct = distance.toFloat() / totalM;
+            }
+        }
 
         // distance text on left
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(8, y + 8, Graphics.FONT_XTINY,
-                    distKm.format("%.1f") + " / " + totalKm.format("%.0f") + " km",
+        var distLabel = (totalKm != null)
+            ? distKm.format("%.1f") + " / " + totalKm.format("%.0f") + " km"
+            : distKm.format("%.1f") + " km";
+        dc.drawText(8, y + 8, Graphics.FONT_XTINY, distLabel,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // bar
+        // bar — only drawn if we have a course; otherwise the row stays clean
         var bx = 100, by = y + 6, bw = w - 160, bh = 4;
-        dc.setColor(0x222226, COL_BG);
-        dc.fillRectangle(bx, by, bw, bh);
-        dc.setColor(COL_GOLD, COL_BG);
-        dc.fillRectangle(bx, by, (bw * pct).toNumber(), bh);
+        if (totalKm != null) {
+            if (pct > 1) { pct = 1.0; } else if (pct < 0) { pct = 0.0; }
+            dc.setColor(0x222226, COL_BG);
+            dc.fillRectangle(bx, by, bw, bh);
+            dc.setColor(COL_GOLD, COL_BG);
+            dc.fillRectangle(bx, by, (bw * pct).toNumber(), bh);
+        }
 
         // ETA on right
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w - 8, y + 8, Graphics.FONT_XTINY, "ETA --:--",
+        dc.drawText(w - 8, y + 8, Graphics.FONT_XTINY, "ETA " + _etaStr(),
                     Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
+    // Current clock time + remaining time on course → "16:08"
+    function _etaStr() {
+        if (timeToDest == null) { return "--:--"; }
+        var now = System.getClockTime();
+        var nowSec = (now.hour * 3600) + (now.min * 60) + now.sec;
+        var etaSec = (nowSec + timeToDest.toNumber()) % 86400;
+        var eh = etaSec / 3600;
+        var em = (etaSec % 3600) / 60;
+        return Lang.format("$1$:$2$", [eh, em.format("%02d")]);
     }
 
     // ──────────────── POWER section ────────────────
@@ -361,10 +394,14 @@ class EdgeDataFieldView extends WatchUi.DataField {
         // sub-metrics
         var subX = w - pad;
         var pctLthr = (hr != null && lthr > 0) ? (hr.toFloat() / lthr * 100).toNumber() : null;
-        // drift = % growth of (HR/Power) over the ride — placeholder calc; refine in v2
-        var drift   = "+0%";
+        var driftPct = DriftTracker.drift();
+        var driftStr = "--";
+        if (driftPct != null) {
+            var sign = (driftPct >= 0) ? "+" : "";
+            driftStr = sign + driftPct.format("%.1f") + "%";
+        }
         _drawSubRight(dc, subX, y + 30, "%LTHR", Format.int(pctLthr));
-        _drawSubRight(dc, subX, y + 45, "DRIFT", drift);
+        _drawSubRight(dc, subX, y + 45, "DRIFT", driftStr);
 
         // zone bar
         var bx = pad, bw = w - 2 * pad, by = y + 64, bh = 12;
@@ -449,8 +486,10 @@ class EdgeDataFieldView extends WatchUi.DataField {
         var seatPct = (seatedTime != null) ? seatedTime.toFloat() / totalPos : 1.0;
         var standPct = 1.0 - seatPct;
 
-        _drawPosRow(dc, pad, by, w - 2*pad, "1:32", COL_LEG_L, seatPct, true);
-        _drawPosRow(dc, pad, by + 18, w - 2*pad, "0:10", COL_LEG_R, standPct, false);
+        var seatStr  = (seatedTime != null)   ? Format.duration(seatedTime)   : "--:--";
+        var standStr = (standingTime != null) ? Format.duration(standingTime) : "--:--";
+        _drawPosRow(dc, pad, by,      w - 2*pad, seatStr,  COL_LEG_L, seatPct,  true);
+        _drawPosRow(dc, pad, by + 18, w - 2*pad, standStr, COL_LEG_R, standPct, false);
     }
 
     function _start(arr) { return (arr != null && arr.size() > 0) ? arr[0] : null; }
@@ -480,9 +519,7 @@ class EdgeDataFieldView extends WatchUi.DataField {
 
     function _drawPosRow(dc, x, y, w, time, color, pct, isSeat) {
         // icon column (16) + time column (28) + bar (rest)
-        // icon is a tiny silhouette — we use a colored circle as a stand-in for v1
-        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(x + 8, y + 6, 4);
+        _drawCyclistIcon(dc, x, y, color, isSeat);
 
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
         dc.drawText(x + 22, y + 6, Graphics.FONT_XTINY, time,
@@ -501,15 +538,47 @@ class EdgeDataFieldView extends WatchUi.DataField {
                     Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
+    // Tiny cyclist silhouette: bike + rider (seated leans forward, standing is upright).
+    // Drawn in a ~14×14 box anchored at (x, y).
+    function _drawCyclistIcon(dc, x, y, color, isSeat) {
+        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(1);
+
+        // Wheels
+        dc.drawCircle(x + 3,  y + 10, 2);   // rear
+        dc.drawCircle(x + 13, y + 10, 2);   // front
+
+        // Bike frame (seat tube + top tube + fork)
+        dc.drawLine(x + 3,  y + 10, x + 8,  y + 4);   // seat tube
+        dc.drawLine(x + 8,  y + 4,  x + 13, y + 10);  // top tube → fork
+
+        if (isSeat) {
+            // Seated: head forward, torso leaning toward bars
+            dc.fillCircle(x + 10, y + 2, 1);
+            dc.drawLine(x + 8, y + 4, x + 10, y + 2);     // torso lean
+            dc.drawLine(x + 8, y + 4, x + 6,  y + 8);     // leg back to pedal
+        } else {
+            // Standing: head up, torso vertical, off the saddle
+            dc.fillCircle(x + 8, y + 1, 1);
+            dc.drawLine(x + 8, y + 2, x + 8,  y + 5);     // upright torso
+            dc.drawLine(x + 8, y + 5, x + 5,  y + 9);     // leg pushing
+        }
+    }
+
     // ──────────────── FOOTER ────────────────
     function _drawFooter(dc, y, h, w) {
         var cellW = w / 4;
-        var labels = ["RIDE", "TSS", "KCAL", "LOAD"];
+        var labels = ["RIDE", "TSS", "KCAL", "kJ"];
         var rideStr = Format.duration(elapsedTime);
         var tssStr  = _tssStr();
         var calStr  = Format.int(calories);
-        var loadStr = "--";   // training load — needs Connect IQ FitContributor or external
-        var values = [rideStr, tssStr, calStr, loadStr];
+        // kJ of mechanical work done: avgPower (W) × time (s) / 1000 = kJ
+        var kjStr = "--";
+        if (avgPower != null && elapsedTime != null && elapsedTime > 0) {
+            var kj = (avgPower.toFloat() * elapsedTime) / 1000.0;
+            kjStr = kj.toNumber().toString();
+        }
+        var values = [rideStr, tssStr, calStr, kjStr];
         var colors = [COL_TEXT, COL_TEXT, COL_CAL, COL_TEXT];
 
         for (var i = 0; i < 4; i++) {
