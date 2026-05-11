@@ -1,0 +1,10 @@
+project.manifest = manifest.xml
+
+# Source roots
+base.sourcePath = source
+
+# Resource roots
+base.resourcePath = resources
+
+# Per-device resource overrides (none yet — single-device build)
+edge1030plus.resourcePath = $(edge1030plus.resourcePath);resources-edge1030plus

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<strings>
+  <string id="AppName">Supernova</string>
+
+  <!-- Section labels -->
+  <string id="LblPower">POWER</string>
+  <string id="LblHR">HEART RATE</string>
+  <string id="LblTimeInZone">TIME IN ZONE</string>
+  <string id="LblSpeed">SPEED</string>
+  <string id="LblCadence">CADENCE</string>
+  <string id="LblPedalDyn">PEDAL DYNAMICS</string>
+
+  <!-- Footer labels -->
+  <string id="LblRide">RIDE</string>
+  <string id="LblTSS">TSS</string>
+  <string id="LblKcal">KCAL</string>
+  <string id="LblLoad">LOAD</string>
+  <string id="LblETA">ETA</string>
+
+  <!-- Settings -->
+  <string id="SetFTP">FTP (W)</string>
+  <string id="SetFTPDesc">Functional Threshold Power, used for Power zones, IF, %FTP, TSS</string>
+  <string id="SetMaxHR">Max HR (bpm)</string>
+  <string id="SetMaxHRDesc">Maximum heart rate, used for HR zones and %Max</string>
+  <string id="SetLTHR">LTHR (bpm)</string>
+  <string id="SetLTHRDesc">Lactate Threshold HR, used for %LTHR</string>
+  <string id="SetWeight">Weight (kg)</string>
+  <string id="SetWeightDesc">Body weight, used for W/kg</string>
+</strings>

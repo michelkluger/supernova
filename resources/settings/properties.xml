@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<properties>
+  <!-- Defaults — user can override in Connect IQ companion app -->
+  <property id="FTP"    type="number">280</property>
+  <property id="MaxHR"  type="number">188</property>
+  <property id="LTHR"   type="number">170</property>
+  <property id="Weight" type="number">70</property>
+</properties>

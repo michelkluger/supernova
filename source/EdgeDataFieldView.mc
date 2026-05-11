@@ -1,0 +1,552 @@
+using Toybox.Activity;
+using Toybox.Application;
+using Toybox.Graphics;
+using Toybox.Lang;
+using Toybox.System;
+using Toybox.Time;
+using Toybox.UserProfile;
+using Toybox.WatchUi;
+
+// ─── EdgeDataFieldView ───
+// Full-screen Connect IQ data field for Edge 1030 Plus (282×470 px).
+// Layout mirrors mockup-v2.html:
+//   STATUS (18px) · PROGRESS (16px) · POWER · TIZ · HR · SPEED|CADENCE · PEDAL DYN · FOOTER (34px)
+class EdgeDataFieldView extends WatchUi.DataField {
+
+    // ─── colors ───
+    const COL_BG        = 0x0c0c10;
+    const COL_TEXT      = 0xf4f4f7;
+    const COL_DIM       = 0x9b9ba4;
+    const COL_MUTED     = 0x5e5e68;
+    const COL_LINE      = 0x1c1c20;
+    const COL_AVG       = 0xef4444;
+    const COL_MAX       = 0xffffff;
+    const COL_GOLD      = 0xfbbf24;
+    const COL_CAL       = 0xfb923c;
+    const COL_GREEN     = 0x22c55e;
+    const COL_LEG_L     = 0x84cc16;
+    const COL_LEG_R     = 0x60a5fa;
+
+    // ─── settings (refreshed each onUpdate) ───
+    var ftp = 280;
+    var maxHR = 188;
+    var lthr = 170;
+    var weight = 70;
+
+    // ─── live values cached in compute() ───
+    var power, avgPower, maxPower;
+    var hr, avgHR, maxHR_v;
+    var speed, avgSpeed, maxSpeed;     // m/s — convert to km/h on draw
+    var cadence, avgCadence, maxCadence;
+    var distance;                       // metres
+    var elapsedTime;                    // seconds
+    var calories;                       // kcal
+    var leftBalance;                    // % left
+    var leftPP, leftPPP, leftPCO;
+    var rightPP, rightPPP, rightPCO;
+    var seatedTime, standingTime;
+    // Time-in-zone (Power, 7 zones) — accumulated seconds per zone
+    var tizPower = [0, 0, 0, 0, 0, 0, 0];
+    var lastSampleTime = null;
+
+    function initialize() {
+        DataField.initialize();
+        _readSettings();
+    }
+
+    function _readSettings() {
+        ftp    = _getProp("FTP", 280);
+        maxHR  = _getProp("MaxHR", 188);
+        lthr   = _getProp("LTHR", 170);
+        weight = _getProp("Weight", 70);
+
+        // Try UserProfile as fallback if settings not set
+        var prof = UserProfile.getProfile();
+        if (prof != null) {
+            // Only fall back if the user hasn't set their own
+            if (maxHR == 188 && prof.maxHR != null) { maxHR = prof.maxHR; }
+            if (weight == 70 && prof.weight != null) { weight = prof.weight / 1000.0; }
+        }
+    }
+
+    function _getProp(key, fallback) {
+        var v = Application.Properties.getValue(key);
+        return (v != null) ? v : fallback;
+    }
+
+    // ─── compute() ───
+    // Called once per second when activity is recording. Cache values, update accumulators.
+    function compute(info) {
+        if (info == null) { return; }
+
+        power      = info.currentPower;
+        avgPower   = info.averagePower;
+        maxPower   = info.maxPower;
+
+        hr         = info.currentHeartRate;
+        avgHR      = info.averageHeartRate;
+        maxHR_v    = info.maxHeartRate;
+
+        speed      = info.currentSpeed;
+        avgSpeed   = info.averageSpeed;
+        maxSpeed   = info.maxSpeed;
+
+        cadence    = info.currentCadence;
+        avgCadence = info.averageCadence;
+        maxCadence = info.maxCadence;
+
+        distance     = info.elapsedDistance;
+        elapsedTime  = info.elapsedTime != null ? info.elapsedTime / 1000 : null;
+        calories     = info.calories;
+
+        // Cycling Dynamics — only present with dual-side power meter
+        leftBalance = info.leftRightBalance;
+        if (info has :leftPowerPhase && info.leftPowerPhase != null) {
+            leftPP = info.leftPowerPhase;            // [start, end] in degrees
+        }
+        if (info has :leftPowerPhasePeak && info.leftPowerPhasePeak != null) {
+            leftPPP = info.leftPowerPhasePeak;
+        }
+        if (info has :leftPlatformCenterOffset) {
+            leftPCO = info.leftPlatformCenterOffset;
+        }
+        if (info has :rightPowerPhase && info.rightPowerPhase != null) {
+            rightPP = info.rightPowerPhase;
+        }
+        if (info has :rightPowerPhasePeak && info.rightPowerPhasePeak != null) {
+            rightPPP = info.rightPowerPhasePeak;
+        }
+        if (info has :rightPlatformCenterOffset) {
+            rightPCO = info.rightPlatformCenterOffset;
+        }
+
+        // Standing/sitting time (from cadence-based detection, available on some PMs)
+        if (info has :timeStanding) { standingTime = info.timeStanding; }
+        if (info has :timeSitting)  { seatedTime   = info.timeSitting; }
+
+        // ─── accumulate time-in-zone for Power ───
+        // simple 1-second accumulator: when this fires, the previous second's power
+        // contributed to its zone. Uses current power as the latest sample.
+        if (power != null && ftp > 0) {
+            var z = Zones.powerZone(power, ftp);   // 1..7
+            tizPower[z - 1] += 1;
+        }
+    }
+
+    // ─── onUpdate() ───
+    // Draws the entire screen. Called when the runtime decides to repaint.
+    function onUpdate(dc) {
+        _readSettings();
+
+        var w = dc.getWidth();   // 282 on Edge 1030+
+        var h = dc.getHeight();  // 470 on Edge 1030+
+
+        // background
+        dc.setColor(COL_BG, COL_BG);
+        dc.clear();
+
+        // ─── section heights (matched to mockup-v2 flex weights) ───
+        // total = 470 — status(18) — prog(16) — footer(34) = 402 for middle 5 sections
+        // weights: power 2.2, tiz 0.55, hr 1.55, tiles 1.3, pdyn 2.4 → sum 8.0 → 50.25/fr
+        var yStatus = 0;
+        var yProg   = yStatus + 18;
+        var yPower  = yProg + 16;
+        var hPower  = 110;
+        var yTiz    = yPower + hPower;
+        var hTiz    = 28;
+        var yHR     = yTiz + hTiz;
+        var hHR     = 78;
+        var yTiles  = yHR + hHR;
+        var hTiles  = 65;
+        var yPedal  = yTiles + hTiles;
+        var hPedal  = 121;
+        var yFooter = h - 34;
+
+        _drawStatusBar(dc, yStatus, w);
+        _drawSeparator(dc, yStatus + 18, w);
+
+        _drawProgress(dc, yProg, w);
+        _drawSeparator(dc, yProg + 16, w);
+
+        _drawPowerSection(dc, yPower, hPower, w);
+        _drawSeparator(dc, yPower + hPower, w);
+
+        _drawTimeInZone(dc, yTiz, hTiz, w);
+        _drawSeparator(dc, yTiz + hTiz, w);
+
+        _drawHRSection(dc, yHR, hHR, w);
+        _drawSeparator(dc, yHR + hHR, w);
+
+        _drawTiles(dc, yTiles, hTiles, w);
+        _drawSeparator(dc, yTiles + hTiles, w);
+
+        _drawPedalDynamics(dc, yPedal, hPedal, w);
+        _drawSeparator(dc, yPedal + hPedal, w);
+
+        _drawFooter(dc, yFooter, 34, w);
+    }
+
+    // ──────────────── status bar ────────────────
+    function _drawStatusBar(dc, y, w) {
+        var sysStats = System.getSystemStats();
+        var battery  = sysStats.battery;     // float 0..100
+
+        var clock = System.getClockTime();
+        var timeStr = Lang.format("$1$:$2$", [clock.hour.format("%02d"), clock.min.format("%02d")]);
+
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(8, y + 9, Graphics.FONT_XTINY, timeStr,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // sensor status dots
+        dc.setColor(COL_GREEN, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(50, y + 9, 2);
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(56, y + 9, Graphics.FONT_XTINY, "GPS",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        dc.setColor(COL_GREEN, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(80, y + 9, 2);
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(86, y + 9, Graphics.FONT_XTINY, "ANT",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // battery (right side)
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w - 26, y + 9, Graphics.FONT_XTINY, battery.format("%d") + "%",
+                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+        // battery icon
+        dc.setColor(COL_GREEN, COL_BG);
+        dc.fillRectangle(w - 22, y + 6, 18, 6);
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawRectangle(w - 22, y + 6, 18, 6);
+    }
+
+    // ──────────────── progress bar ────────────────
+    function _drawProgress(dc, y, w) {
+        var distKm = (distance != null) ? distance / 1000.0 : 0.0;
+        var totalKm = 48.0;   // TODO: read from loaded course; placeholder for now
+        var pct = (distKm / totalKm);
+        if (pct > 1) { pct = 1.0; }
+        if (pct < 0) { pct = 0.0; }
+
+        // distance text on left
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(8, y + 8, Graphics.FONT_XTINY,
+                    distKm.format("%.1f") + " / " + totalKm.format("%.0f") + " km",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // bar
+        var bx = 100, by = y + 6, bw = w - 160, bh = 4;
+        dc.setColor(0x222226, COL_BG);
+        dc.fillRectangle(bx, by, bw, bh);
+        dc.setColor(COL_GOLD, COL_BG);
+        dc.fillRectangle(bx, by, (bw * pct).toNumber(), bh);
+
+        // ETA on right
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w - 8, y + 8, Graphics.FONT_XTINY, "ETA --:--",
+                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
+    // ──────────────── POWER section ────────────────
+    function _drawPowerSection(dc, y, h, w) {
+        var pad = 10;
+
+        // section label
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "POWER",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // big number on left
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad, y + 38, Graphics.FONT_NUMBER_MEDIUM, Format.int(power),
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad + 78, y + 50, Graphics.FONT_XTINY, "W",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // ø / ▲ line (avg/max)
+        dc.setColor(COL_AVG, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad, y + 64, Graphics.FONT_XTINY, "ø " + Format.int(avgPower),
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad + 56, y + 64, Graphics.FONT_XTINY, "▲ " + Format.int(maxPower),
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // sub-metrics on right
+        var subX = w - pad;
+        var ifVal  = (avgPower != null && ftp > 0) ? avgPower.toFloat() / ftp : null;
+        var pctFTP = (power != null && ftp > 0) ? (power.toFloat() / ftp * 100).toNumber() : null;
+        var wkg    = (power != null && weight > 0) ? power.toFloat() / weight : null;
+        var lr     = (leftBalance != null) ? leftBalance.toString() + "/" + (100 - leftBalance).toString() : "--/--";
+
+        _drawSubRight(dc, subX, y + 32, "IF",    Format.fixed(ifVal, 2));
+        _drawSubRight(dc, subX, y + 47, "W/kg",  Format.fixed(wkg, 1));
+        _drawSubRight(dc, subX, y + 62, "%FTP",  Format.int(pctFTP));
+
+        // ─── zone bar ───
+        var bx = pad, bw = w - 2 * pad, by = y + 80, bh = 14;
+        var labels = ["Z1","Z2","Z3","Z4","Z5","Z6","Z7"];
+        var curZone = Zones.powerZone(power, ftp);
+        var curPos  = Zones.powerBarPos(power, ftp);
+        var avgPos  = Zones.powerBarPos(avgPower, ftp);
+        var maxPos  = Zones.powerBarPos(maxPower, ftp);
+        ZoneBar.draw(dc, bx, by, bw, bh,
+                     Zones.POWER_COLORS, labels, curZone,
+                     curPos, avgPos, maxPos, null, null);
+    }
+
+    function _drawSubRight(dc, rightX, y, label, value) {
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(rightX, y, Graphics.FONT_XTINY, value,
+                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(rightX - 30, y, Graphics.FONT_XTINY, label,
+                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
+    // ──────────────── TIME IN ZONE bar ────────────────
+    function _drawTimeInZone(dc, y, h, w) {
+        var pad = 10;
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad, y + 7, Graphics.FONT_XTINY, "TIME IN ZONE",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // total
+        var total = 0;
+        for (var i = 0; i < tizPower.size(); i++) { total += tizPower[i]; }
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w - pad, y + 7, Graphics.FONT_XTINY,
+                    Format.duration(total) + " total",
+                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // stacked bar
+        if (total <= 0) { return; }
+        var bx = pad, bw = w - 2 * pad, by = y + 16, bh = 10;
+        var x = bx;
+        for (var i = 0; i < tizPower.size(); i++) {
+            var seg = ((tizPower[i].toFloat() / total) * bw).toNumber();
+            if (seg <= 0) { continue; }
+            dc.setColor(Zones.POWER_COLORS[i], Zones.POWER_COLORS[i]);
+            dc.fillRectangle(x, by, seg, bh);
+            x += seg;
+        }
+    }
+
+    // ──────────────── HEART RATE section ────────────────
+    function _drawHRSection(dc, y, h, w) {
+        var pad = 10;
+
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "HEART RATE",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // big number
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad, y + 32, Graphics.FONT_NUMBER_MILD, Format.int(hr),
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad + 60, y + 42, Graphics.FONT_XTINY, "BPM",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // ø / ▲
+        dc.setColor(COL_AVG, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad, y + 54, Graphics.FONT_XTINY, "ø " + Format.int(avgHR),
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad + 50, y + 54, Graphics.FONT_XTINY, "▲ " + Format.int(maxHR_v),
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // sub-metrics
+        var subX = w - pad;
+        var pctLthr = (hr != null && lthr > 0) ? (hr.toFloat() / lthr * 100).toNumber() : null;
+        // drift = % growth of (HR/Power) over the ride — placeholder calc; refine in v2
+        var drift   = "+0%";
+        _drawSubRight(dc, subX, y + 30, "%LTHR", Format.int(pctLthr));
+        _drawSubRight(dc, subX, y + 45, "DRIFT", drift);
+
+        // zone bar
+        var bx = pad, bw = w - 2 * pad, by = y + 64, bh = 12;
+        var curZone = Zones.hrZone(hr, maxHR);
+        var curPos  = Zones.hrBarPos(hr, maxHR);
+        var avgPos  = Zones.hrBarPos(avgHR, maxHR);
+        var maxPos  = Zones.hrBarPos(maxHR_v, maxHR);
+        var hrLabels = ["Z1","Z2","Z3","Z4","Z5"];
+        ZoneBar.draw(dc, bx, by, bw, bh,
+                     Zones.HR_COLORS, hrLabels, curZone,
+                     curPos, avgPos, maxPos, null, null);
+    }
+
+    // ──────────────── SPEED + CADENCE tiles ────────────────
+    function _drawTiles(dc, y, h, w) {
+        var halfW = w / 2;
+
+        // vertical divider
+        dc.setColor(COL_LINE, Graphics.COLOR_TRANSPARENT);
+        dc.drawLine(halfW, y, halfW, y + h);
+
+        var spdKmh = (speed != null) ? speed * 3.6 : null;
+        var avgSpdKmh = (avgSpeed != null) ? avgSpeed * 3.6 : null;
+        var maxSpdKmh = (maxSpeed != null) ? maxSpeed * 3.6 : null;
+
+        _drawTile(dc, 0, y, halfW, h, "SPEED", "km/h",
+                  Format.fixed(spdKmh, 1),
+                  Format.fixed(avgSpdKmh, 1), Format.fixed(maxSpdKmh, 1));
+        _drawTile(dc, halfW, y, halfW, h, "CADENCE", "rpm",
+                  Format.int(cadence),
+                  Format.int(avgCadence), Format.int(maxCadence));
+    }
+
+    function _drawTile(dc, x, y, w, h, label, unit, val, avgStr, maxStr) {
+        var pad = 10;
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + pad, y + 8, Graphics.FONT_XTINY, label,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + pad, y + 30, Graphics.FONT_NUMBER_MILD, val,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + pad + 56, y + 38, Graphics.FONT_XTINY, unit,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        dc.setColor(COL_AVG, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + pad, y + h - 10, Graphics.FONT_XTINY, "ø " + avgStr,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + pad + 50, y + h - 10, Graphics.FONT_XTINY, "▲ " + maxStr,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
+    // ──────────────── PEDAL DYNAMICS ────────────────
+    function _drawPedalDynamics(dc, y, h, w) {
+        var pad = 10;
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "PEDAL DYNAMICS",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // L/R balance values from leftBalance (FIT spec: lower 7 bits = right %)
+        var lBal = (leftBalance != null) ? (100 - leftBalance) : 50;
+        var rBal = (leftBalance != null) ? leftBalance : 50;
+
+        // Two pedal circles
+        var cy = y + 38, r = 20;
+        var lcx = pad + r;
+        var rcx = w / 2 + r - 5;
+
+        PedalCircle.draw(dc, lcx, cy, r, COL_LEG_L,
+                         _start(leftPP), _end(leftPP),
+                         _start(leftPPP), _end(leftPPP), lBal);
+        PedalCircle.draw(dc, rcx, cy, r, COL_LEG_R,
+                         _start(rightPP), _end(rightPP),
+                         _start(rightPPP), _end(rightPPP), rBal);
+
+        // Side info: PP / PPP / PCO for each pedal
+        _drawPedInfo(dc, lcx + r + 6, y + 22, leftPP, leftPPP, leftPCO);
+        _drawPedInfo(dc, rcx + r + 6, y + 22, rightPP, rightPPP, rightPCO);
+
+        // ─── sit/stand bars below ───
+        var by = y + 76;
+        var totalPos = 0;
+        if (seatedTime != null) { totalPos += seatedTime; }
+        if (standingTime != null) { totalPos += standingTime; }
+        if (totalPos <= 0) { totalPos = 1; }   // avoid /0; bars will read 100/0 with no data
+        var seatPct = (seatedTime != null) ? seatedTime.toFloat() / totalPos : 1.0;
+        var standPct = 1.0 - seatPct;
+
+        _drawPosRow(dc, pad, by, w - 2*pad, "1:32", COL_LEG_L, seatPct, true);
+        _drawPosRow(dc, pad, by + 18, w - 2*pad, "0:10", COL_LEG_R, standPct, false);
+    }
+
+    function _start(arr) { return (arr != null && arr.size() > 0) ? arr[0] : null; }
+    function _end(arr)   { return (arr != null && arr.size() > 1) ? arr[1] : null; }
+
+    function _drawPedInfo(dc, x, y, pp, ppp, pco) {
+        dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x, y,      Graphics.FONT_XTINY, "PP",  Graphics.TEXT_JUSTIFY_LEFT);
+        dc.drawText(x, y + 11, Graphics.FONT_XTINY, "PPP", Graphics.TEXT_JUSTIFY_LEFT);
+        dc.drawText(x, y + 22, Graphics.FONT_XTINY, "PCO", Graphics.TEXT_JUSTIFY_LEFT);
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + 60, y,      Graphics.FONT_XTINY, _angleStr(pp),  Graphics.TEXT_JUSTIFY_RIGHT);
+        dc.drawText(x + 60, y + 11, Graphics.FONT_XTINY, _angleStr(ppp), Graphics.TEXT_JUSTIFY_RIGHT);
+        dc.drawText(x + 60, y + 22, Graphics.FONT_XTINY, _pcoStr(pco),   Graphics.TEXT_JUSTIFY_RIGHT);
+    }
+
+    function _angleStr(arr) {
+        if (arr == null || arr.size() < 2) { return "--"; }
+        return arr[0].toString() + "–" + arr[1].toString() + "°";
+    }
+
+    function _pcoStr(mm) {
+        if (mm == null) { return "--"; }
+        var s = (mm >= 0) ? "+" : "";
+        return s + mm.toString() + "mm";
+    }
+
+    function _drawPosRow(dc, x, y, w, time, color, pct, isSeat) {
+        // icon column (16) + time column (28) + bar (rest)
+        // icon is a tiny silhouette — we use a colored circle as a stand-in for v1
+        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(x + 8, y + 6, 4);
+
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + 22, y + 6, Graphics.FONT_XTINY, time,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        var bx = x + 50, bw = w - 50, bh = 8;
+        dc.setColor(0x222226, COL_BG);
+        dc.fillRectangle(bx, y + 2, bw, bh);
+        dc.setColor(color, COL_BG);
+        dc.fillRectangle(bx, y + 2, (bw * pct).toNumber(), bh);
+
+        // pct text overlaid right
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(bx + bw - 4, y + 6, Graphics.FONT_XTINY,
+                    (pct * 100).toNumber().toString() + "%",
+                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
+    // ──────────────── FOOTER ────────────────
+    function _drawFooter(dc, y, h, w) {
+        var cellW = w / 4;
+        var labels = ["RIDE", "TSS", "KCAL", "LOAD"];
+        var rideStr = Format.duration(elapsedTime);
+        var tssStr  = _tssStr();
+        var calStr  = Format.int(calories);
+        var loadStr = "--";   // training load — needs Connect IQ FitContributor or external
+        var values = [rideStr, tssStr, calStr, loadStr];
+        var colors = [COL_TEXT, COL_TEXT, COL_CAL, COL_TEXT];
+
+        for (var i = 0; i < 4; i++) {
+            var cx = i * cellW + cellW / 2;
+            dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx, y + 8, Graphics.FONT_XTINY, labels[i],
+                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+            dc.setColor(colors[i], Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx, y + 22, Graphics.FONT_TINY, values[i],
+                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+
+            // cell divider
+            if (i < 3) {
+                dc.setColor(COL_LINE, Graphics.COLOR_TRANSPARENT);
+                dc.drawLine((i + 1) * cellW, y + 4, (i + 1) * cellW, y + h - 4);
+            }
+        }
+    }
+
+    function _tssStr() {
+        // TSS = (sec × NP × IF) / (FTP × 3600) × 100
+        // We don't have NP yet — approximate with avg power for now
+        if (avgPower == null || elapsedTime == null || ftp <= 0) { return "--"; }
+        var ifVal = avgPower.toFloat() / ftp;
+        var tss = (elapsedTime * avgPower * ifVal) / (ftp * 3600.0) * 100.0;
+        return tss.toNumber().toString();
+    }
+
+    // ──────────────── separators ────────────────
+    function _drawSeparator(dc, y, w) {
+        dc.setColor(COL_LINE, Graphics.COLOR_TRANSPARENT);
+        dc.drawLine(0, y, w, y);
+    }
+}

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
+
+  <iq:application
+      entry="EdgeDataFieldApp"
+      id="9c1b8a2e4d8341b6a0e2b3f7d09b21ea"
+      launcherIcon="@Drawables.LauncherIcon"
+      name="@Strings.AppName"
+      type="datafield"
+      version="0.1.0"
+      minApiLevel="3.2.0">
+
+    <!-- Targets the Edge 1030 Plus exclusively for now.
+         Add more devices later (edge1040, edge840, etc) when validated. -->
+    <iq:products>
+      <iq:product id="edge1030plus"/>
+    </iq:products>
+
+    <!-- UserProfile gives us max HR / LTHR / weight / HR zones.
+         FTP isn't in profile — read from app settings. -->
+    <iq:permissions>
+      <iq:uses-permission id="UserProfile"/>
+    </iq:permissions>
+
+    <iq:languages>
+      <iq:language>eng</iq:language>
+    </iq:languages>
+
+    <iq:barrels/>
+
+  </iq:application>
+</iq:manifest>

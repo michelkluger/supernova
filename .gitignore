@@ -1,0 +1,13 @@
+# Build artifacts
+bin/
+*.prg
+*.iq
+
+# Developer key — NEVER commit
+*.der
+developer_key*
+
+# IDE
+.vscode/
+*.swp
+.DS_Store

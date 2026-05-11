@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings>
+  <!-- Settings UI shown in the Garmin Connect IQ companion app.
+       User edits these on phone; we read via Application.Properties.getValue("...") -->
+
+  <setting propertyKey="@Properties.FTP" title="@Strings.SetFTP">
+    <settingConfig type="numeric" min="50" max="600">
+    </settingConfig>
+  </setting>
+
+  <setting propertyKey="@Properties.MaxHR" title="@Strings.SetMaxHR">
+    <settingConfig type="numeric" min="120" max="220">
+    </settingConfig>
+  </setting>
+
+  <setting propertyKey="@Properties.LTHR" title="@Strings.SetLTHR">
+    <settingConfig type="numeric" min="100" max="200">
+    </settingConfig>
+  </setting>
+
+  <setting propertyKey="@Properties.Weight" title="@Strings.SetWeight">
+    <settingConfig type="numeric" min="30" max="150">
+    </settingConfig>
+  </setting>
+</settings>
