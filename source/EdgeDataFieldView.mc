@@ -494,14 +494,16 @@ class EdgeDataFieldView extends WatchUi.DataField {
         dc.drawText(w - pad - ascWidth - 8, y + 8, Graphics.FONT_XTINY, dscStr,
                     Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // ── Three primary cells: GRADE, ALTITUDE, VAM ──
-        var grade = TerrainTracker.grade();
-        var vam   = TerrainTracker.vam();
-        var cellW = (w - 2 * pad) / 3;
+        // ── Layout: GRADE is the focal metric (big), ALT + VAM smaller on the right ──
+        // Cells: [Grade 38%] [Alt 32%] [VAM 30%]
+        var avail = w - 2 * pad;
+        var gradeW = (avail * 38 / 100).toNumber();
+        var altW   = (avail * 32 / 100).toNumber();
         var cellY = y + 30;   // value baseline
         var lblY  = y + 50;   // label baseline
 
-        // Grade — color-coded (gold climbing / blue descending / gray flat)
+        // Grade — color-coded, big font (focal)
+        var grade = TerrainTracker.grade();
         var gradeStr = (grade != null) ? grade.format("%.1f") : "--";
         var gradeColor = COL_CAL;
         if (grade != null && grade < -0.5) { gradeColor = 0x60a5fa; }
@@ -513,21 +515,22 @@ class EdgeDataFieldView extends WatchUi.DataField {
         dc.drawText(pad, lblY, Graphics.FONT_XTINY, "GRADE %",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Altitude
+        // Altitude — smaller font (FONT_TINY) so 4-digit values fit
         var altStr = (altitude != null) ? altitude.toNumber().toString() : "--";
-        var ax = pad + cellW;
+        var ax = pad + gradeW;
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(ax, cellY, Graphics.FONT_NUMBER_MILD, altStr,
+        dc.drawText(ax, cellY, Graphics.FONT_TINY, altStr,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
         dc.drawText(ax, lblY, Graphics.FONT_XTINY, "ALT m",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // VAM
+        // VAM — smaller font
+        var vam   = TerrainTracker.vam();
         var vamStr = (vam != null && vam > 0) ? vam.toString() : "--";
-        var vx = pad + cellW * 2;
+        var vx = pad + gradeW + altW;
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(vx, cellY, Graphics.FONT_NUMBER_MILD, vamStr,
+        dc.drawText(vx, cellY, Graphics.FONT_TINY, vamStr,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
         dc.drawText(vx, lblY, Graphics.FONT_XTINY, "VAM m/h",
