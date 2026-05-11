@@ -1,5 +1,6 @@
 using Toybox.Activity;
 using Toybox.Application;
+using Toybox.AntPlus;
 using Toybox.Graphics;
 using Toybox.Lang;
 using Toybox.System;
@@ -51,10 +52,24 @@ class EdgeDataFieldView extends WatchUi.DataField {
     var tizPower = [0, 0, 0, 0, 0, 0, 0];
     var lastSampleTime = null;
 
+    // ANT+ Bike Power listener — only path to L/R balance / torque / smoothness
+    var antPower;     // AntPlus.BikePower instance
+    var antListener;  // SupernovaPowerListener
+
     function initialize() {
         DataField.initialize();
         _readSettings();
         DriftTracker.reset();
+
+        // Try to subscribe to ANT+ Bike Power — gives us L/R balance + torque/smoothness
+        // that Activity.Info doesn't expose. Wrapped in try in case no PM is paired.
+        try {
+            antListener = new SupernovaPowerListener();
+            antPower = new AntPlus.BikePower(antListener);
+        } catch (e) {
+            antPower = null;
+            antListener = null;
+        }
     }
 
     function _readSettings() {
@@ -454,115 +469,82 @@ class EdgeDataFieldView extends WatchUi.DataField {
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // ──────────────── PEDAL DYNAMICS ────────────────
+    // ──────────────── PEDAL POWER (L/R balance + torque + smoothness) ────────────────
+    // PP/PPP/PCO arcs aren't available to Connect IQ apps — section redesigned around
+    // what AntPlus.BikePower DOES expose: balance, torque effectiveness, pedal smoothness.
     function _drawPedalDynamics(dc, y, h, w) {
         var pad = 10;
+
+        // Section label
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "PEDAL DYNAMICS",
+        dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "PEDAL POWER",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // L/R balance values from leftBalance (FIT spec: lower 7 bits = right %)
-        var lBal = (leftBalance != null) ? (100 - leftBalance) : 50;
-        var rBal = (leftBalance != null) ? leftBalance : 50;
-
-        // Two pedal circles
-        var cy = y + 38, r = 20;
-        var lcx = pad + r;
-        var rcx = w / 2 + r - 5;
-
-        PedalCircle.draw(dc, lcx, cy, r, COL_LEG_L, leftPP, leftPPP, lBal);
-        PedalCircle.draw(dc, rcx, cy, r, COL_LEG_R, rightPP, rightPPP, rBal);
-
-        // Side info: PP / PPP / PCO for each pedal
-        _drawPedInfo(dc, lcx + r + 6, y + 22, leftPP, leftPPP, leftPCO);
-        _drawPedInfo(dc, rcx + r + 6, y + 22, rightPP, rightPPP, rightPCO);
-
-        // ─── sit/stand bars below ───
-        var by = y + 76;
-        var totalPos = 0;
-        if (seatedTime != null) { totalPos += seatedTime; }
-        if (standingTime != null) { totalPos += standingTime; }
-        if (totalPos <= 0) { totalPos = 1; }   // avoid /0; bars will read 100/0 with no data
-        var seatPct = (seatedTime != null) ? seatedTime.toFloat() / totalPos : 1.0;
-        var standPct = 1.0 - seatPct;
-
-        var seatStr  = (seatedTime != null)   ? Format.duration(seatedTime)   : "--:--";
-        var standStr = (standingTime != null) ? Format.duration(standingTime) : "--:--";
-        _drawPosRow(dc, pad, by,      w - 2*pad, seatStr,  COL_LEG_L, seatPct,  true);
-        _drawPosRow(dc, pad, by + 18, w - 2*pad, standStr, COL_LEG_R, standPct, false);
-    }
-
-    function _start(arr) { return (arr != null && arr.size() > 0) ? arr[0] : null; }
-    function _end(arr)   { return (arr != null && arr.size() > 1) ? arr[1] : null; }
-
-    function _drawPedInfo(dc, x, y, pp, ppp, pco) {
-        dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x, y,      Graphics.FONT_XTINY, "PP",  Graphics.TEXT_JUSTIFY_LEFT);
-        dc.drawText(x, y + 11, Graphics.FONT_XTINY, "PPP", Graphics.TEXT_JUSTIFY_LEFT);
-        dc.drawText(x, y + 22, Graphics.FONT_XTINY, "PCO", Graphics.TEXT_JUSTIFY_LEFT);
-        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + 60, y,      Graphics.FONT_XTINY, _angleStr(pp),  Graphics.TEXT_JUSTIFY_RIGHT);
-        dc.drawText(x + 60, y + 11, Graphics.FONT_XTINY, _angleStr(ppp), Graphics.TEXT_JUSTIFY_RIGHT);
-        dc.drawText(x + 60, y + 22, Graphics.FONT_XTINY, _pcoStr(pco),   Graphics.TEXT_JUSTIFY_RIGHT);
-    }
-
-    function _angleStr(arr) {
-        if (arr == null || arr.size() < 2) { return "--"; }
-        return arr[0].toString() + "–" + arr[1].toString() + "°";
-    }
-
-    function _pcoStr(mm) {
-        if (mm == null) { return "--"; }
-        var s = (mm >= 0) ? "+" : "";
-        return s + mm.toString() + "mm";
-    }
-
-    function _drawPosRow(dc, x, y, w, time, color, pct, isSeat) {
-        // icon column (16) + time column (28) + bar (rest)
-        _drawCyclistIcon(dc, x, y, color, isSeat);
-
-        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + 22, y + 6, Graphics.FONT_XTINY, time,
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-
-        var bx = x + 50, bw = w - 50, bh = 8;
-        dc.setColor(0x222226, COL_BG);
-        dc.fillRectangle(bx, y + 2, bw, bh);
-        dc.setColor(color, COL_BG);
-        dc.fillRectangle(bx, y + 2, (bw * pct).toNumber(), bh);
-
-        // pct text overlaid right
-        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(bx + bw - 4, y + 6, Graphics.FONT_XTINY,
-                    (pct * 100).toNumber().toString() + "%",
-                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
-    }
-
-    // Tiny cyclist silhouette: bike + rider (seated leans forward, standing is upright).
-    // Drawn in a ~14×14 box anchored at (x, y).
-    function _drawCyclistIcon(dc, x, y, color, isSeat) {
-        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(1);
-
-        // Wheels
-        dc.drawCircle(x + 3,  y + 10, 2);   // rear
-        dc.drawCircle(x + 13, y + 10, 2);   // front
-
-        // Bike frame (seat tube + top tube + fork)
-        dc.drawLine(x + 3,  y + 10, x + 8,  y + 4);   // seat tube
-        dc.drawLine(x + 8,  y + 4,  x + 13, y + 10);  // top tube → fork
-
-        if (isSeat) {
-            // Seated: head forward, torso leaning toward bars
-            dc.fillCircle(x + 10, y + 2, 1);
-            dc.drawLine(x + 8, y + 4, x + 10, y + 2);     // torso lean
-            dc.drawLine(x + 8, y + 4, x + 6,  y + 8);     // leg back to pedal
-        } else {
-            // Standing: head up, torso vertical, off the saddle
-            dc.fillCircle(x + 8, y + 1, 1);
-            dc.drawLine(x + 8, y + 2, x + 8,  y + 5);     // upright torso
-            dc.drawLine(x + 8, y + 5, x + 5,  y + 9);     // leg pushing
+        // Live data from the ANT+ listener (null until first message arrives)
+        var lBal = null;
+        var rBal = null;
+        var teL = null, teR = null, psL = null, psR = null;
+        if (antListener != null) {
+            if (antListener.leftBalance != null) {
+                lBal = antListener.leftBalance;
+                rBal = 100 - lBal;
+            }
+            teL = antListener.torqueEffL;
+            teR = antListener.torqueEffR;
+            psL = antListener.pedalSmoothL;
+            psR = antListener.pedalSmoothR;
         }
+
+        // ── L/R balance bar — the centerpiece ──
+        var bx = pad, by = y + 28, bw = w - 2*pad, bh = 18;
+        if (lBal != null) {
+            var leftW = ((lBal.toFloat() / 100.0) * bw).toNumber();
+            dc.setColor(COL_LEG_L, COL_BG);
+            dc.fillRectangle(bx, by, leftW, bh);
+            dc.setColor(COL_LEG_R, COL_BG);
+            dc.fillRectangle(bx + leftW, by, bw - leftW, bh);
+
+            // L %  and  R %  inside the bar
+            dc.setColor(0x0a0a0e, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(bx + 8, by + bh/2, Graphics.FONT_TINY,
+                        "L " + lBal.toNumber().toString() + "%",
+                        Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+            dc.drawText(bx + bw - 8, by + bh/2, Graphics.FONT_TINY,
+                        rBal.toNumber().toString() + "% R",
+                        Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+        } else {
+            // No live balance data — show neutral 50/50 placeholder bar
+            dc.setColor(0x222226, COL_BG);
+            dc.fillRectangle(bx, by, bw, bh);
+            dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(bx + bw/2, by + bh/2, Graphics.FONT_XTINY,
+                        "waiting for power meter",
+                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        }
+
+        // ── torque effectiveness + pedal smoothness as 2 sub-rows ──
+        var sy = by + bh + 6;
+        _drawPedalSubRow(dc, pad, sy,      w - 2*pad, "TORQUE",   teL, teR);
+        _drawPedalSubRow(dc, pad, sy + 16, w - 2*pad, "SMOOTH",   psL, psR);
+    }
+
+    // Draw one sub-row: label on left, L val and R val pushed to the right (colored).
+    function _drawPedalSubRow(dc, x, y, w, label, lVal, rVal) {
+        dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x, y + 6, Graphics.FONT_XTINY, label,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        var lStr = (lVal != null) ? lVal.format("%.0f") + "%" : "--";
+        var rStr = (rVal != null) ? rVal.format("%.0f") + "%" : "--";
+
+        // Left value: leg-green
+        dc.setColor(COL_LEG_L, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + w * 0.55, y + 6, Graphics.FONT_XTINY, "L " + lStr,
+                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+        // Right value: leg-blue
+        dc.setColor(COL_LEG_R, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + w, y + 6, Graphics.FONT_XTINY, "R " + rStr,
+                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
     // ──────────────── FOOTER ────────────────

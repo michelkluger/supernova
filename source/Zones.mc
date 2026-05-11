@@ -7,10 +7,10 @@ module Zones {
 
     // ─── color constants — exported as 0xRRGGBB (Graphics expects this format) ───
     const HR_COLORS = [
-        0x9CA3AF, 0x3B82F6, 0x22C55E, 0xF97316, 0xEF4444
+        0xD1D5DB, 0x3B82F6, 0x22C55E, 0xF97316, 0xEF4444
     ];
     const POWER_COLORS = [
-        0x9CA3AF, 0x3B82F6, 0x22C55E, 0xEAB308, 0xF97316, 0xEF4444, 0xA855F7
+        0xD1D5DB, 0x3B82F6, 0x22C55E, 0xEAB308, 0xF97316, 0xEF4444, 0xA855F7
     ];
 
     // ─── Coggan-style power zone fractions of FTP (upper bound of each zone) ───
