@@ -501,7 +501,7 @@ class EdgeDataFieldView extends WatchUi.DataField {
         var cellY = y + 30;   // value baseline
         var lblY  = y + 50;   // label baseline
 
-        // Grade
+        // Grade — color-coded (gold climbing / blue descending / gray flat)
         var gradeStr = (grade != null) ? grade.format("%.1f") : "--";
         var gradeColor = COL_CAL;
         if (grade != null && grade < -0.5) { gradeColor = 0x60a5fa; }
@@ -509,11 +509,8 @@ class EdgeDataFieldView extends WatchUi.DataField {
         dc.setColor(gradeColor, Graphics.COLOR_TRANSPARENT);
         dc.drawText(pad, cellY, Graphics.FONT_NUMBER_MILD, gradeStr,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad + 36, cellY + 8, Graphics.FONT_XTINY, "%",
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, lblY, Graphics.FONT_XTINY, "GRADE",
+        dc.drawText(pad, lblY, Graphics.FONT_XTINY, "GRADE %",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // Altitude
@@ -522,11 +519,8 @@ class EdgeDataFieldView extends WatchUi.DataField {
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
         dc.drawText(ax, cellY, Graphics.FONT_NUMBER_MILD, altStr,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(ax + 38, cellY + 8, Graphics.FONT_XTINY, "m",
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(ax, lblY, Graphics.FONT_XTINY, "ALTITUDE",
+        dc.drawText(ax, lblY, Graphics.FONT_XTINY, "ALT m",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // VAM
@@ -535,11 +529,8 @@ class EdgeDataFieldView extends WatchUi.DataField {
         dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
         dc.drawText(vx, cellY, Graphics.FONT_NUMBER_MILD, vamStr,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(vx + 40, cellY + 8, Graphics.FONT_XTINY, "m/h",
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(vx, lblY, Graphics.FONT_XTINY, "VAM",
+        dc.drawText(vx, lblY, Graphics.FONT_XTINY, "VAM m/h",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // ── Next waypoint preview (only when on a course AND there's a real next point) ──
