@@ -60,12 +60,11 @@ class EdgeDataFieldView extends WatchUi.DataField {
         lthr   = _getProp("LTHR", 170);
         weight = _getProp("Weight", 70);
 
-        // Try UserProfile as fallback if settings not set
+        // UserProfile fallback: only weight is a direct field on the Profile type.
+        // Max HR isn't exposed as a single property — leave it user-set via settings.
         var prof = UserProfile.getProfile();
-        if (prof != null) {
-            // Only fall back if the user hasn't set their own
-            if (maxHR == 188 && prof.maxHR != null) { maxHR = prof.maxHR; }
-            if (weight == 70 && prof.weight != null) { weight = prof.weight / 1000.0; }
+        if (prof != null && weight == 70 && prof.weight != null) {
+            weight = prof.weight / 1000.0;
         }
     }
 
@@ -100,7 +99,9 @@ class EdgeDataFieldView extends WatchUi.DataField {
         calories     = info.calories;
 
         // Cycling Dynamics — only present with dual-side power meter
-        leftBalance = info.leftRightBalance;
+        // Note: Activity.Info doesn't expose L/R balance directly on the Edge 1030+ SDK 9 surface.
+        // For v0.1 we default to 50/50; real balance will come via FIT message parsing in a later iteration.
+        leftBalance = 50;
         if (info has :leftPowerPhase && info.leftPowerPhase != null) {
             leftPP = info.leftPowerPhase;            // [start, end] in degrees
         }
@@ -279,8 +280,7 @@ class EdgeDataFieldView extends WatchUi.DataField {
         var ifVal  = (avgPower != null && ftp > 0) ? avgPower.toFloat() / ftp : null;
         var pctFTP = (power != null && ftp > 0) ? (power.toFloat() / ftp * 100).toNumber() : null;
         var wkg    = (power != null && weight > 0) ? power.toFloat() / weight : null;
-        var lr     = (leftBalance != null) ? leftBalance.toString() + "/" + (100 - leftBalance).toString() : "--/--";
-
+        // L/R balance display reserved for when FIT-level balance is wired in
         _drawSubRight(dc, subX, y + 32, "IF",    Format.fixed(ifVal, 2));
         _drawSubRight(dc, subX, y + 47, "W/kg",  Format.fixed(wkg, 1));
         _drawSubRight(dc, subX, y + 62, "%FTP",  Format.int(pctFTP));
@@ -292,9 +292,9 @@ class EdgeDataFieldView extends WatchUi.DataField {
         var curPos  = Zones.powerBarPos(power, ftp);
         var avgPos  = Zones.powerBarPos(avgPower, ftp);
         var maxPos  = Zones.powerBarPos(maxPower, ftp);
-        ZoneBar.draw(dc, bx, by, bw, bh,
+        ZoneBar.draw(dc, [bx, by, bw, bh],
                      Zones.POWER_COLORS, labels, curZone,
-                     curPos, avgPos, maxPos, null, null);
+                     curPos, avgPos, maxPos);
     }
 
     function _drawSubRight(dc, rightX, y, label, value) {
@@ -373,9 +373,9 @@ class EdgeDataFieldView extends WatchUi.DataField {
         var avgPos  = Zones.hrBarPos(avgHR, maxHR);
         var maxPos  = Zones.hrBarPos(maxHR_v, maxHR);
         var hrLabels = ["Z1","Z2","Z3","Z4","Z5"];
-        ZoneBar.draw(dc, bx, by, bw, bh,
+        ZoneBar.draw(dc, [bx, by, bw, bh],
                      Zones.HR_COLORS, hrLabels, curZone,
-                     curPos, avgPos, maxPos, null, null);
+                     curPos, avgPos, maxPos);
     }
 
     // ──────────────── SPEED + CADENCE tiles ────────────────
@@ -392,13 +392,14 @@ class EdgeDataFieldView extends WatchUi.DataField {
 
         _drawTile(dc, 0, y, halfW, h, "SPEED", "km/h",
                   Format.fixed(spdKmh, 1),
-                  Format.fixed(avgSpdKmh, 1), Format.fixed(maxSpdKmh, 1));
+                  "ø " + Format.fixed(avgSpdKmh, 1) + "    ▲ " + Format.fixed(maxSpdKmh, 1));
         _drawTile(dc, halfW, y, halfW, h, "CADENCE", "rpm",
                   Format.int(cadence),
-                  Format.int(avgCadence), Format.int(maxCadence));
+                  "ø " + Format.int(avgCadence) + "    ▲ " + Format.int(maxCadence));
     }
 
-    function _drawTile(dc, x, y, w, h, label, unit, val, avgStr, maxStr) {
+    // 9-arg max per Monkey C function — avg/max packed into a single caption string.
+    function _drawTile(dc, x, y, w, h, label, unit, val, ammin) {
         var pad = 10;
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
         dc.drawText(x + pad, y + 8, Graphics.FONT_XTINY, label,
@@ -411,11 +412,8 @@ class EdgeDataFieldView extends WatchUi.DataField {
         dc.drawText(x + pad + 56, y + 38, Graphics.FONT_XTINY, unit,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        dc.setColor(COL_AVG, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + pad, y + h - 10, Graphics.FONT_XTINY, "ø " + avgStr,
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + pad + 50, y + h - 10, Graphics.FONT_XTINY, "▲ " + maxStr,
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(x + pad, y + h - 10, Graphics.FONT_XTINY, ammin,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
@@ -435,12 +433,8 @@ class EdgeDataFieldView extends WatchUi.DataField {
         var lcx = pad + r;
         var rcx = w / 2 + r - 5;
 
-        PedalCircle.draw(dc, lcx, cy, r, COL_LEG_L,
-                         _start(leftPP), _end(leftPP),
-                         _start(leftPPP), _end(leftPPP), lBal);
-        PedalCircle.draw(dc, rcx, cy, r, COL_LEG_R,
-                         _start(rightPP), _end(rightPP),
-                         _start(rightPPP), _end(rightPPP), rBal);
+        PedalCircle.draw(dc, lcx, cy, r, COL_LEG_L, leftPP, leftPPP, lBal);
+        PedalCircle.draw(dc, rcx, cy, r, COL_LEG_R, rightPP, rightPPP, rBal);
 
         // Side info: PP / PPP / PCO for each pedal
         _drawPedInfo(dc, lcx + r + 6, y + 22, leftPP, leftPPP, leftPCO);

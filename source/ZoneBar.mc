@@ -16,19 +16,17 @@ module ZoneBar {
     const COLOR_MAX = 0xFFFFFF;       // white
     const COLOR_DIM = 0x000000;       // overlay color for unreached portion (50% alpha applied via dither)
 
-    // Draw a zone bar.
-    //   dc        — drawing context
-    //   x, y      — top-left of bar
-    //   w, h      — bar dimensions
-    //   colors    — array of zone colors (5 or 7 entries)
-    //   labels    — array of zone labels parallel to colors (e.g. "Z1".."Z7"); pass null for no labels
-    //   currentZone — 1..N, segment to highlight as bold
-    //   curPos    — float 0..1, position of current marker on the full bar
-    //   avgPos    — float 0..1, position of avg marker (or null)
-    //   maxPos    — float 0..1, position of max marker (or null)
-    //   avgLbl    — text shown ABOVE the avg marker, e.g. "ø198"
-    //   maxLbl    — text shown BELOW the max marker, e.g. "▲612"
-    function draw(dc, x, y, w, h, colors, labels, currentZone, curPos, avgPos, maxPos, avgLbl, maxLbl) {
+    // Draw a zone bar. Args packed to stay under Monkey C's 9-arg limit:
+    //   dc       — drawing context
+    //   rect     — [x, y, w, h]
+    //   colors   — array of zone colors (5 or 7)
+    //   labels   — array of segment labels (Z1..Zn) or null
+    //   curZone  — 1..n, segment to highlight; null = no highlight
+    //   curPos   — 0..1, current marker position (null = no marker)
+    //   avgPos   — 0..1, avg marker position (null = none)
+    //   maxPos   — 0..1, max marker position (null = none)
+    function draw(dc, rect, colors, labels, curZone, curPos, avgPos, maxPos) {
+        var x = rect[0]; var y = rect[1]; var w = rect[2]; var h = rect[3];
         var n = colors.size();
         var segW = w.toFloat() / n;
 
@@ -40,7 +38,7 @@ module ZoneBar {
             dc.fillRectangle(sx, y, sw, h);
 
             // Darken non-current segments
-            if (currentZone != null && (i + 1) != currentZone) {
+            if (curZone != null && (i + 1) != curZone) {
                 dc.setColor(0x000000, 0x000000);
                 dc.setPenWidth(1);
                 // use a translucent darken — Connect IQ has no alpha rect, so we do a 1px pattern
@@ -49,10 +47,8 @@ module ZoneBar {
 
             // segment label inside (e.g. Z1, Z2…)
             if (labels != null) {
-                var isBold = (currentZone != null && (i + 1) == currentZone);
                 dc.setColor(0x000000, Graphics.COLOR_TRANSPARENT);
-                var font = isBold ? Graphics.FONT_XTINY : Graphics.FONT_XTINY;
-                dc.drawText(sx + (sw / 2), y + (h / 2), font, labels[i],
+                dc.drawText(sx + (sw / 2), y + (h / 2), Graphics.FONT_XTINY, labels[i],
                             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
             }
         }
@@ -63,32 +59,22 @@ module ZoneBar {
             dc.setColor(0xFFFFFF, Graphics.COLOR_TRANSPARENT);
             dc.fillRectangle(cx, y - MARKER_OVERHANG, MARKER_W, h + 2 * MARKER_OVERHANG);
         }
-
-        // ─── AVG marker (red, label ABOVE) ───
+        // ─── AVG marker (red) ───
         if (avgPos != null) {
             var ax = x + (avgPos * w).toNumber();
             dc.setColor(COLOR_AVG, Graphics.COLOR_TRANSPARENT);
             dc.fillRectangle(ax, y - MARKER_OVERHANG, MARKER_W, h + 2 * MARKER_OVERHANG);
-            if (avgLbl != null) {
-                dc.drawText(ax + 1, y - MARKER_OVERHANG - LABEL_GAP, Graphics.FONT_XTINY, avgLbl,
-                            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-            }
         }
-
-        // ─── MAX marker (white, label BELOW) ───
+        // ─── MAX marker (white) ───
         if (maxPos != null) {
             var mx = x + (maxPos * w).toNumber();
             dc.setColor(COLOR_MAX, Graphics.COLOR_TRANSPARENT);
             dc.fillRectangle(mx, y - MARKER_OVERHANG, MARKER_W, h + 2 * MARKER_OVERHANG);
-            if (maxLbl != null) {
-                dc.drawText(mx + 1, y + h + MARKER_OVERHANG + LABEL_GAP, Graphics.FONT_XTINY, maxLbl,
-                            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-            }
         }
     }
 
     // Stripe-darken a rect using 1px alternating lines — cheap alpha sim.
-    hidden function _darkenRect(dc, x, y, w, h) {
+    function _darkenRect(dc, x, y, w, h) {
         for (var dy = 0; dy < h; dy += 2) {
             dc.fillRectangle(x, y + dy, w, 1);
         }

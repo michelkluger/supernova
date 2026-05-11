@@ -10,45 +10,39 @@ module PedalCircle {
     // Convert pedal angle (0=TDC, 90=3-o'clock, going clockwise) to Graphics arc start angle.
     // Graphics.drawArc uses: 0° = 3-o'clock, +90° = 12-o'clock (counter-clockwise math)
     // So pedal 0 (TDC) = graphics 90, pedal 90 (3 o'clock) = graphics 0, pedal 180 (BDC) = graphics 270 (or -90).
-    hidden function pedalToGraphics(pedalDeg) {
+    function pedalToGraphics(pedalDeg) {
         return (90 - pedalDeg + 360) % 360;
     }
 
-    // Draw a single pedal circle.
-    //   dc            — drawing context
-    //   cx, cy        — circle center
-    //   r             — outer radius
-    //   color         — arc color (green for left, blue for right)
-    //   ppStart, ppEnd  — Power Phase start/end in pedal degrees (0=TDC, clockwise)
-    //   pppStart, pppEnd — Peak Power Phase angles
-    //   balance       — left or right balance percentage (e.g. 47)
-    function draw(dc, cx, cy, r, color, ppStart, ppEnd, pppStart, pppEnd, balance) {
+    // Draw a single pedal circle. Args packed for the 9-arg limit:
+    //   dc      — drawing context
+    //   cx, cy  — circle center
+    //   r       — outer radius
+    //   color   — arc color (green for left, blue for right)
+    //   ppArc   — [startDeg, endDeg] in pedal degrees, or null
+    //   pppArc  — [startDeg, endDeg], or null
+    //   balance — left/right balance percent (e.g. 47), or null
+    function draw(dc, cx, cy, r, color, ppArc, pppArc, balance) {
 
         // Background ring
         dc.setColor(0x1c1c1f, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(5);
         dc.drawCircle(cx, cy, r);
 
-        // Power Phase arc (medium thickness)
-        if (ppStart != null && ppEnd != null) {
+        // Power Phase arc
+        if (ppArc != null && ppArc.size() >= 2 && ppArc[0] != null && ppArc[1] != null) {
             dc.setColor(color, Graphics.COLOR_TRANSPARENT);
             dc.setPenWidth(5);
-            // drawArc takes (cx, cy, r, attr, startDeg, endDeg)
-            // attr: ARC_CLOCKWISE (1) or ARC_COUNTER_CLOCKWISE (0)
-            // Graphics angles: 0=East, 90=North, 180=West, 270=South — ccw.
-            // We want clockwise sweep from ppStart to ppEnd in PEDAL coords.
-            var gStart = pedalToGraphics(ppStart);
-            var gEnd   = pedalToGraphics(ppEnd);
-            dc.drawArc(cx, cy, r, Graphics.ARC_CLOCKWISE, gStart, gEnd);
+            dc.drawArc(cx, cy, r, Graphics.ARC_CLOCKWISE,
+                       pedalToGraphics(ppArc[0]), pedalToGraphics(ppArc[1]));
         }
 
         // Peak Power Phase arc (thicker)
-        if (pppStart != null && pppEnd != null) {
+        if (pppArc != null && pppArc.size() >= 2 && pppArc[0] != null && pppArc[1] != null) {
             dc.setColor(color, Graphics.COLOR_TRANSPARENT);
             dc.setPenWidth(9);
-            var gpStart = pedalToGraphics(pppStart);
-            var gpEnd   = pedalToGraphics(pppEnd);
-            dc.drawArc(cx, cy, r, Graphics.ARC_CLOCKWISE, gpStart, gpEnd);
+            dc.drawArc(cx, cy, r, Graphics.ARC_CLOCKWISE,
+                       pedalToGraphics(pppArc[0]), pedalToGraphics(pppArc[1]));
         }
 
         // TDC tick (top)
