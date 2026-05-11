@@ -1,6 +1,5 @@
 using Toybox.Activity;
 using Toybox.Application;
-using Toybox.AntPlus;
 using Toybox.Graphics;
 using Toybox.Lang;
 using Toybox.System;
@@ -44,6 +43,11 @@ class EdgeDataFieldView extends WatchUi.DataField {
     var calories;                       // kcal
     var distanceToDest;                 // metres remaining on loaded course (null if no course)
     var timeToDest;                     // seconds remaining (null if no course)
+    var altitude;                       // metres above sea level
+    var totalAscent;                    // total ascent meters this activity
+    var totalDescent;                   // total descent meters
+    var distanceToNextPoint;            // metres to next course waypoint
+    var elevationAtNextPoint;           // altitude at next course waypoint
     var leftBalance;                    // % left
     var leftPP, leftPPP, leftPCO;
     var rightPP, rightPPP, rightPCO;
@@ -52,24 +56,12 @@ class EdgeDataFieldView extends WatchUi.DataField {
     var tizPower = [0, 0, 0, 0, 0, 0, 0];
     var lastSampleTime = null;
 
-    // ANT+ Bike Power listener — only path to L/R balance / torque / smoothness
-    var antPower;     // AntPlus.BikePower instance
-    var antListener;  // SupernovaPowerListener
 
     function initialize() {
         DataField.initialize();
         _readSettings();
         DriftTracker.reset();
-
-        // Try to subscribe to ANT+ Bike Power — gives us L/R balance + torque/smoothness
-        // that Activity.Info doesn't expose. Wrapped in try in case no PM is paired.
-        try {
-            antListener = new SupernovaPowerListener();
-            antPower = new AntPlus.BikePower(antListener);
-        } catch (e) {
-            antPower = null;
-            antListener = null;
-        }
+        TerrainTracker.reset();
     }
 
     function _readSettings() {
@@ -120,8 +112,18 @@ class EdgeDataFieldView extends WatchUi.DataField {
         if (info has :distanceToDestination) { distanceToDest = info.distanceToDestination; }
         if (info has :timeToDestination)     { timeToDest     = info.timeToDestination; }
 
-        // Roll the drift tracker
+        // Terrain
+        if (info has :altitude)              { altitude              = info.altitude; }
+        if (info has :totalAscent)           { totalAscent           = info.totalAscent; }
+        if (info has :totalDescent)          { totalDescent          = info.totalDescent; }
+        if (info has :distanceToNextPoint)   { distanceToNextPoint   = info.distanceToNextPoint; }
+        if (info has :elevationAtNextPoint)  { elevationAtNextPoint  = info.elevationAtNextPoint; }
+
+        // Roll the trackers
         DriftTracker.tick(power, hr);
+        if (elapsedTime != null) {
+            TerrainTracker.tick(altitude, distance, elapsedTime);
+        }
 
         // Cycling Dynamics — only present with dual-side power meter
         // Note: Activity.Info doesn't expose L/R balance directly on the Edge 1030+ SDK 9 surface.
@@ -206,7 +208,7 @@ class EdgeDataFieldView extends WatchUi.DataField {
         _drawTiles(dc, yTiles, hTiles, w);
         _drawSeparator(dc, yTiles + hTiles, w);
 
-        _drawPedalDynamics(dc, yPedal, hPedal, w);
+        _drawTerrain(dc, yPedal, hPedal, w);
         _drawSeparator(dc, yPedal + hPedal, w);
 
         _drawFooter(dc, yFooter, 34, w);
@@ -469,82 +471,100 @@ class EdgeDataFieldView extends WatchUi.DataField {
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    // ──────────────── PEDAL POWER (L/R balance + torque + smoothness) ────────────────
-    // PP/PPP/PCO arcs aren't available to Connect IQ apps — section redesigned around
-    // what AntPlus.BikePower DOES expose: balance, torque effectiveness, pedal smoothness.
-    function _drawPedalDynamics(dc, y, h, w) {
+    // ──────────────── TERRAIN ────────────────
+    // Live grade (from TerrainTracker), current altitude, VAM, plus ride totals.
+    // Optional NEXT row when course waypoints are loaded.
+    function _drawTerrain(dc, y, h, w) {
         var pad = 10;
 
         // Section label
         dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "PEDAL POWER",
+        dc.drawText(pad, y + 8, Graphics.FONT_XTINY, "TERRAIN",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Live data from the ANT+ listener (null until first message arrives)
-        var lBal = null;
-        var rBal = null;
-        var teL = null, teR = null, psL = null, psR = null;
-        if (antListener != null) {
-            if (antListener.leftBalance != null) {
-                lBal = antListener.leftBalance;
-                rBal = 100 - lBal;
-            }
-            teL = antListener.torqueEffL;
-            teR = antListener.torqueEffR;
-            psL = antListener.pedalSmoothL;
-            psR = antListener.pedalSmoothR;
-        }
+        // Totals (ascent / descent) — small, top-right
+        var ascentStr  = (totalAscent  != null) ? "↑" + totalAscent.toNumber().toString() + "m"  : "↑--";
+        var descentStr = (totalDescent != null) ? "↓" + totalDescent.toNumber().toString() + "m" : "↓--";
+        dc.setColor(COL_CAL, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w - pad, y + 8, Graphics.FONT_XTINY, ascentStr,
+                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(0x60a5fa, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w - pad - 56, y + 8, Graphics.FONT_XTINY, descentStr,
+                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // ── L/R balance bar — the centerpiece ──
-        var bx = pad, by = y + 28, bw = w - 2*pad, bh = 18;
-        if (lBal != null) {
-            var leftW = ((lBal.toFloat() / 100.0) * bw).toNumber();
-            dc.setColor(COL_LEG_L, COL_BG);
-            dc.fillRectangle(bx, by, leftW, bh);
-            dc.setColor(COL_LEG_R, COL_BG);
-            dc.fillRectangle(bx + leftW, by, bw - leftW, bh);
+        // ── Three primary cells: GRADE, ALTITUDE, VAM ──
+        var grade = TerrainTracker.grade();
+        var vam   = TerrainTracker.vam();
+        var cellW = (w - 2 * pad) / 3;
+        var cellY = y + 30;   // value baseline
+        var lblY  = y + 50;   // label baseline
 
-            // L %  and  R %  inside the bar
-            dc.setColor(0x0a0a0e, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(bx + 8, by + bh/2, Graphics.FONT_TINY,
-                        "L " + lBal.toNumber().toString() + "%",
-                        Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-            dc.drawText(bx + bw - 8, by + bh/2, Graphics.FONT_TINY,
-                        rBal.toNumber().toString() + "% R",
-                        Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
-        } else {
-            // No live balance data — show neutral 50/50 placeholder bar
-            dc.setColor(0x222226, COL_BG);
-            dc.fillRectangle(bx, by, bw, bh);
-            dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(bx + bw/2, by + bh/2, Graphics.FONT_XTINY,
-                        "waiting for power meter",
-                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-        }
-
-        // ── torque effectiveness + pedal smoothness as 2 sub-rows ──
-        var sy = by + bh + 6;
-        _drawPedalSubRow(dc, pad, sy,      w - 2*pad, "TORQUE",   teL, teR);
-        _drawPedalSubRow(dc, pad, sy + 16, w - 2*pad, "SMOOTH",   psL, psR);
-    }
-
-    // Draw one sub-row: label on left, L val and R val pushed to the right (colored).
-    function _drawPedalSubRow(dc, x, y, w, label, lVal, rVal) {
+        // Grade
+        var gradeStr = (grade != null) ? grade.format("%.1f") : "--";
+        var gradeColor = COL_CAL;
+        if (grade != null && grade < -0.5) { gradeColor = 0x60a5fa; }
+        else if (grade != null && grade < 0.5) { gradeColor = COL_DIM; }
+        dc.setColor(gradeColor, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad, cellY, Graphics.FONT_NUMBER_MILD, gradeStr,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(pad + 36, cellY + 8, Graphics.FONT_XTINY, "%",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x, y + 6, Graphics.FONT_XTINY, label,
+        dc.drawText(pad, lblY, Graphics.FONT_XTINY, "GRADE",
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        var lStr = (lVal != null) ? lVal.format("%.0f") + "%" : "--";
-        var rStr = (rVal != null) ? rVal.format("%.0f") + "%" : "--";
+        // Altitude
+        var altStr = (altitude != null) ? altitude.toNumber().toString() : "--";
+        var ax = pad + cellW;
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(ax, cellY, Graphics.FONT_NUMBER_MILD, altStr,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(ax + 38, cellY + 8, Graphics.FONT_XTINY, "m",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(ax, lblY, Graphics.FONT_XTINY, "ALTITUDE",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Left value: leg-green
-        dc.setColor(COL_LEG_L, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + w * 0.55, y + 6, Graphics.FONT_XTINY, "L " + lStr,
-                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
-        // Right value: leg-blue
-        dc.setColor(COL_LEG_R, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + w, y + 6, Graphics.FONT_XTINY, "R " + rStr,
-                    Graphics.TEXT_JUSTIFY_RIGHT | Graphics.TEXT_JUSTIFY_VCENTER);
+        // VAM
+        var vamStr = (vam != null && vam > 0) ? vam.toString() : "--";
+        var vx = pad + cellW * 2;
+        dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(vx, cellY, Graphics.FONT_NUMBER_MILD, vamStr,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_DIM, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(vx + 40, cellY + 8, Graphics.FONT_XTINY, "m/h",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(COL_MUTED, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(vx, lblY, Graphics.FONT_XTINY, "VAM",
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        // ── Next waypoint preview (only when on a course) ──
+        if (distanceToNextPoint != null && elevationAtNextPoint != null && altitude != null) {
+            var ny = y + 70;
+            // dashed divider
+            dc.setColor(COL_LINE, Graphics.COLOR_TRANSPARENT);
+            for (var dx = pad; dx < w - pad; dx += 4) {
+                dc.drawLine(dx, ny - 4, dx + 2, ny - 4);
+            }
+
+            dc.setColor(COL_CAL, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(pad, ny + 6, Graphics.FONT_XTINY, "NEXT",
+                        Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+
+            var dKm = distanceToNextPoint.toFloat() / 1000.0;
+            var dAlt = elevationAtNextPoint - altitude;
+            var avgPct = (distanceToNextPoint > 5) ? (dAlt / distanceToNextPoint * 100) : 0;
+            var sign = (dAlt >= 0) ? "+" : "";
+
+            dc.setColor(COL_TEXT, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(pad + 36, ny + 6, Graphics.FONT_XTINY,
+                        "in " + dKm.format("%.1f") + " km  ·  " +
+                        sign + dAlt.toNumber().toString() + " m  ·  " +
+                        avgPct.format("%.1f") + "%",
+                        Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        }
     }
 
     // ──────────────── FOOTER ────────────────
